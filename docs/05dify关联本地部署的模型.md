@@ -1,6 +1,11 @@
 # Dify
 
-## Dify的手册
+## Dify的模型
 
-https://docs.dify.ai/zh-hans
+## Xinference部署模型
+
+
+
+
+
 
