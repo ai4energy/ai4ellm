@@ -171,6 +171,133 @@ services:
 
 把以前按照大语言模型食用指南下载的模型拷贝到models目录。在xinference的网页界面上设置自定义模型，就可以加载了。
 
+### 6. api-key设置
+
+参照Xinference文档中OAuth2说明（ https://inference.readthedocs.io/zh-cn/latest/user_guide/auth_system.html ）。
+
+目前，Xinference 内部定义了以下几个接口权限：
+
+models:list: 获取模型列表和信息的权限。
+
+models:read: 使用模型的权限。
+
+models:register: 注册模型的权限。
+
+models:unregister: 取消注册模型的权限。
+
+models:start: 启动模型的权限。
+
+models:stop: 停止模型的权限。
+
+admin: 管理员拥有所有接口的权限。
+
+1. 建立auth_config.json文件
+
+```json
+{
+    "auth_config": {
+        "algorithm": "HS256",
+        "secret_key": "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7",
+        "token_expire_in_minutes": 30
+    },
+    "user_config": [
+        {
+            "username": "user1",
+            "password": "secret1",
+            "permissions": [
+                "admin"
+            ],
+            "api_keys": [
+                "sk-72tkvudyGLPMi",
+                "sk-ZOTLIY4gt9w11"
+            ]
+        },
+        {
+            "username": "user2",
+            "password": "secret2",
+            "permissions": [
+                "models:list",
+                "models:read"
+            ],
+            "api_keys": [
+                "sk-35tkasdyGLYMy",
+                "sk-ALTbgl6ut981w"
+            ]
+        }
+    ]
+}
+```
+
+
+2. auth_config.json字段说明
+
+  ```json
+  {
+    "algorithm": "用于令牌生成与解析的算法。推荐使用 HS 系列算法，例如 `HS256`、`HS384` 或者 `HS512` 算法。",
+    "secret_key": "用于令牌生成和解析的密钥。可以使用该命令生成匹配 HS 系列算法的密钥：`openssl rand -hex 32`",
+    "token_expire_in_minutes": "保留字段，表示令牌失效时间。目前 Xinference 开源版本不会检查令牌过期时间。"
+  }
+  ```
+- **`user_config`**:  这个字段用来配置用户和权限信息。每个用户信息由以下字段组成：
+  ```json
+  {
+    "username": "字符串，表示用户名",
+    "password": "字符串，表示密码",
+    "permissions": ["字符串列表，表示该用户拥有的权限"],
+    "api_keys": ["字符串列表，表示该用户拥有的 api-key。用户可以通过这些 api-key，无需登录或认证即可访问 Xinference 接口。这些 api-key 组成类似 OPENAI_API_KEY，总是以 sk- 开头，后跟 13 个数字、大小写字母。"]
+  }
+  ```
+**生成类似sk-72tkvudyGLPMi的格式**
+```shell
+echo "sk-$(openssl rand -base64 10 | tr -d '+/' | cut -c1-13)"
+```
+
+3. 使用说明
+
+**Docker中运行：**  
+配置好这样的 JSON 文件后，可以使用 `--auth-config` 选项启用 **身份验证和授权系统** 的 Xinference。例如，本地启动的命令如下所示：
+
+```bash
+xinference-local -H 0.0.0.0 --auth-config /path/to/your_json_config_file
+```
+在分布式环境下，只需要在启动 supervisor 时指定这个选项：
+
+```bash
+xinference-supervisor -H <supervisor_ip> --auth-config /path/to/your_json_config_file
+```
+
+***注意***
+
+在浏览器访问时需要输入 **用户名和密码** 才可访问。  
+
+如果在 **Dify** 中访问，需要按照如下方式配置 `auth_config.json` 才可正常访问：
+
+```json
+{
+    "auth_config": {
+        "algorithm": "HS256",
+        "secret_key": "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7",
+        "token_expire_in_minutes": 30
+    },
+    "user_config": [
+        {
+            "username": "apiuser",
+            "password": "unused_password",
+            "permissions": [
+                "admin"
+            ],
+            "api_keys": [
+                "sk-72tkvudyGLPMi"
+            ]
+        }
+    ]
+}
+```
+
+ **重要说明**  
+ **根据目前的机制，Xinference 的权限管理是基于「用户」这一概念的。**  
+ 即使你 **只想使用 API Key，而不想使用用户名 + 密码登录**，你 **仍然需要在 `user_config` 中创建至少一个用户**，但可以完全忽略它的用户名密码登录功能。  
+ **只要客户端请求带上该用户的 API Key，就能通过鉴权。**
 
 ## 四、方案对比
 
