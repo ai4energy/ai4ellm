@@ -106,9 +106,17 @@ sudo apt-get update
 
 ```bash
 sudo apt-get install -y nvidia-container-toolkit
+
+### 4. **配置 Docker**
+
+使用如下的命令配置Docker使用nvidia运行时
+
+```bash
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
 ```
 
-### 4. **运行 Docker 中的示例工作负载**
+### 5. **运行 Docker 中的示例工作负载**
 
 安装和配置好 NVIDIA Container Toolkit 以及 NVIDIA GPU 驱动后，可以通过 Docker 运行支持 GPU 的工作负载。
 
