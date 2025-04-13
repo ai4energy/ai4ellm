@@ -1,0 +1,12 @@
+tqdm
+numpy
+sentence-transformers
+PyPDF2
+comtypes
+magic-pdf
+loguru
+os
+re
+math
+sys
+torch                   2.3.1+cu118
