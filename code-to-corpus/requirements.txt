@@ -1,0 +1,5 @@
+ruamel.std.zipfile
+requests
+urllib3
+charset-mnbvc
+tqdm
