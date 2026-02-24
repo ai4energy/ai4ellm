@@ -1,0 +1,11 @@
+# Enhanced PDF Processing Requirements
+pdfplumber>=0.7.6
+PyMuPDF>=1.23.0
+unstructured[all-docs]>=0.10.0
+sentence-transformers>=2.2.2
+numpy>=1.21.0
+tqdm>=4.64.0
+pandas>=1.5.0
+loguru>=0.6.0
+torch>=1.13.0
+pillow>=9.0.0

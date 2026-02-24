@@ -1,0 +1,24 @@
+{
+  "processing_options": {
+    "min_text_length": 50,
+    "max_chunk_size": 1000,
+    "overlap": 100,
+    "deduplication_threshold": 0.9,
+    "supported_formats": [".pdf"],
+    "save_format": "jsonl"
+  },
+  "extraction_methods": {
+    "primary": "unstructured",
+    "fallback_order": ["pdfplumber", "pymupdf", "basic"]
+  },
+  "cleaning_options": {
+    "remove_page_numbers": true,
+    "remove_copyright": true,
+    "remove_headers_footers": true,
+    "preserve_tables": true
+  },
+  "logging": {
+    "level": "INFO",
+    "output_file": "processing.log"
+  }
+}
