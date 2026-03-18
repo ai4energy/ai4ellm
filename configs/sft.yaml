@@ -1,0 +1,73 @@
+# SFT语料处理配置
+
+# API配置
+api:
+  type: "deepseek"  # deepseek, openai, claude, qwen, zhipu
+  api_key: "${API_KEY}"  # 从环境变量读取
+  model: ""  # 使用默认模型
+  max_tokens: 2048
+  temperature: 0.7
+  max_retries: 3
+  concurrency: 5  # 并发请求数
+
+# 数据生成
+generation:
+  # 问答对生成
+  qa:
+    enabled: true
+    domain: "energy"  # general, technical, academic, code, energy
+    num_questions_per_text: 3
+    input_file: "data/contexts.txt"
+    output_file: "output/sft_qa.jsonl"
+
+  # 多轮对话生成
+  conversation:
+    enabled: false
+    type: "qa"  # qa, code, analysis, energy
+    num_turns: 3
+    topics_file: "data/topics.txt"
+    output_file: "output/sft_conversations.jsonl"
+
+  # 摘要生成
+  summary:
+    enabled: false
+    style: "brief"  # brief, detailed, bullet
+    input_file: "data/articles.txt"
+    output_file: "output/sft_summaries.jsonl"
+
+  # 代码解释生成
+  code:
+    enabled: false
+    language: "python"
+    input_file: "data/code_samples.jsonl"
+    output_file: "output/sft_code.jsonl"
+
+# 格式转换
+format:
+  input_format: "auto"  # auto, qa, alpaca, conversation, sharegpt
+  output_format: "messages"  # messages, prompt-completion
+  min_length: 10
+  max_length: 50000
+  input_dir: "output/generated"
+  output_dir: "output/sft_formatted"
+
+# 数据验证
+validation:
+  enabled: true
+  strict: false
+  max_errors: 100
+
+# 数据集划分
+split:
+  enabled: true
+  test_size: 0.1
+  val_size: 0.1
+  seed: 42
+  output_dir: "output/sft_dataset"
+
+# 输出配置
+output:
+  train_file: "train.jsonl"
+  val_file: "val.jsonl"
+  test_file: "test.jsonl"
+  stats_file: "stats.json"

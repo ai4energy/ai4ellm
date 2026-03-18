@@ -1,0 +1,67 @@
+# 预训练语料处理配置
+
+# 数据采集
+collection:
+  github:
+    enabled: true
+    tokens_file: "github_tokens.txt"
+    start_id: 1
+    end_id: 1000000
+    output_dir: "output/github_raw"
+
+  web:
+    enabled: false
+    urls_file: "urls.txt"
+    output_dir: "output/web_raw"
+
+# 文本提取
+extraction:
+  pdf:
+    enabled: true
+    method: "auto"  # mineru, pymupdf, auto
+    use_ocr_api: false
+    ocr_api_type: "deepseek"  # deepseek, qwen
+    ocr_api_key: "${OCR_API_KEY}"
+    input_dir: "data/pdfs"
+    output_dir: "output/pdf_extracted"
+
+  code:
+    enabled: true
+    input_dir: "output/github_raw"
+    output_dir: "output/code_extracted"
+
+# 数据清洗
+cleaning:
+  enabled: true
+  remove_html: true
+  remove_urls: true
+  remove_emails: true
+  remove_garbled: true
+  normalize_whitespace: true
+  min_line_length: 10
+  input_dir: "output/extracted"
+  output_dir: "output/cleaned"
+
+# 去重
+deduplication:
+  enabled: true
+  method: "hybrid"  # exact, minhash, semantic, hybrid
+  threshold: 0.9
+  input_dir: "output/cleaned"
+  output_dir: "output/deduped"
+
+# 格式转换
+format:
+  min_length: 100
+  max_length: 1000000
+  include_metadata: true
+  input_dir: "output/deduped"
+  output_dir: "output/pretrain_final"
+
+# 数据集划分
+split:
+  enabled: true
+  test_size: 0.01
+  val_size: 0.01
+  seed: 42
+  output_dir: "output/pretrain_dataset"

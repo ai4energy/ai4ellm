@@ -1,0 +1,46 @@
+# AI4LLM 语料库构建工具依赖
+
+# 核心依赖
+tqdm>=4.65.0
+pyyaml>=6.0
+requests>=2.28.0
+aiohttp>=3.8.0
+
+# ============ 预训练模块 ============
+
+# PDF提取
+# MinerU (推荐，高质量OCR)
+# pip install magic-pdf[full]
+
+# PyMuPDF (快速文本提取)
+# PyMuPDF>=1.23.0
+
+# pdfplumber (表格友好)
+# pdfplumber>=0.9.0
+
+# 去重
+# datasketch>=1.6.0  # MinHash LSH
+# sentence-transformers>=2.2.0  # 语义去重
+
+# 编码检测 (用于代码语料)
+# charset-mnbvc>=0.1.0
+
+# ============ SFT模块 ============
+
+# API调用
+openai>=1.0.0  # DeepSeek/OpenAI
+# anthropic>=0.18.0  # Claude
+# dashscope>=1.14.0  # 通义千问
+# zhipuai>=2.0.0  # 智谱AI
+
+# ============ 可选依赖 ============
+
+# 数据集处理
+# datasets>=2.14.0
+# huggingface-hub>=0.16.0
+
+# 日志
+loguru>=0.7.0
+
+# 并行处理
+# multiprocessing-logging>=0.3.0
