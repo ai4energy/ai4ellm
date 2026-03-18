@@ -198,7 +198,6 @@ python scripts/run_sft_pipeline.py --config configs/sft.yaml
 - **完整文档**: [docs/README.md](docs/README.md)
 - **预训练配置**: [configs/pretrain.yaml](configs/pretrain.yaml)
 - **SFT配置**: [configs/sft.yaml](configs/sft.yaml)
-- **示例代码**: [examples/](examples/)
 
 ---
 

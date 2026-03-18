@@ -37,6 +37,7 @@
 ```
 ai4ellm/
 ├── pretrain/                        # 预训练模块
+│   ├── data-collection/             # 数据采集（预留）
 │   ├── text-extraction/             # 文本提取
 │   │   └── pdf_extractor.py         # PDF提取（MinerU/PyMuPDF/OCR API）
 │   ├── cleaning/                    # 数据清洗
@@ -47,6 +48,7 @@ ai4ellm/
 │       └── convert_to_pretrain.py   # 预训练格式转换
 │
 ├── sft/                             # 监督微调模块
+│   ├── qa-construction/             # QA构建（预留）
 │   ├── data-generation/             # 数据生成
 │   │   ├── generate_qa.py           # API问答对生成
 │   │   └── generate_multi_type.py   # 多类型数据生成
@@ -56,23 +58,17 @@ ai4ellm/
 │       └── validate_dataset.py      # 数据集验证
 │
 ├── tools/                           # 通用工具
-│   └── dataset/
-│       └── dataset_utils.py         # 数据集划分/合并/采样
+│   ├── dataset/
+│   │   └── dataset_utils.py         # 数据集划分/合并/采样
+│   └── utils/                       # 通用工具（预留）
 │
 ├── scripts/                         # 一键脚本
 │   ├── run_pretrain_pipeline.py     # 预训练流水线
 │   └── run_sft_pipeline.py          # SFT流水线
 │
-├── configs/                         # 配置文件
-│   ├── pretrain.yaml                # 预训练配置
-│   └── sft.yaml                     # SFT配置
-│
-├── examples/                        # 示例代码
-│   └── generate_sft_data.py
-│
-├── code-to-corpus/                  # GitHub代码处理（原有）
-├── pdf-to-corpus/                   # PDF文档处理（原有）
-└── enhanced-pdf-processing/         # 增强PDF处理（原有）
+└── configs/                         # 配置文件
+    ├── pretrain.yaml                # 预训练配置
+    └── sft.yaml                     # SFT配置
 ```
 
 ---
