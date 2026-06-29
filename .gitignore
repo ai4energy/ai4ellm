@@ -169,3 +169,30 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Docker
+.dockerignore
+
+# AI4ELLM: data & output (not tracked)
+data/
+output/
+*.jsonl
+
+# AI4ELLM: large data directories
+origin-files/
+origin-files-organized/
+models_cache/
+train_output/
+eval_results/
+corpus_pipeline/output/
+corpus_pipeline_code_version/
+*.zip
+
+# AI4ELLM: temp & cache
+file-index.json
+*.log
+
+# AI4ELLM: API keys & secrets
+github_tokens.txt
+*.key
+.env.local

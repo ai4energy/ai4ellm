@@ -1,0 +1,57 @@
+# 冒烟测试配置：验证训练脚本能跑通 forward/backward（2 样本，1 step）
+# 不追求效果，只验证模型加载 + LoRA 注入 + 一个优化步
+model:
+  name_or_path: "/app/models/hf/hub/models--Qwen--Qwen3-14B/snapshots"
+  snapshot_dir: null
+  tokenizer_name_or_path: null
+  torch_dtype: "bfloat16"
+  attn_implementation: "sdpa"      # 冒烟用 sdpa（镜像没装 flash-attn）
+
+data:
+  pretrain_file: "/app/output/smoke_3samples.jsonl"
+  text_field: "text"
+  max_length: 512
+  use_section_prefix: false
+  packing: false                   # 冒烟不打包
+
+lora:
+  enabled: true
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.0
+  target_modules: ["q_proj", "v_proj"]
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+quantization:
+  enabled: true                    # 冒烟用 4bit，~8G 权重，16G 卡能跑
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "bfloat16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+training:
+  output_dir: "/app/output/pretrain_smoke"
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  logging_steps: 1
+  save_strategy: "no"
+  save_steps: 100000
+  save_total_limit: 1
+  bf16: true
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  report_to: "none"
+  dataloader_num_workers: 0
+  seed: 42
+  max_steps: 1                     # 冒烟只跑 1 步
+
+resume:
+  resume_from_checkpoint: null

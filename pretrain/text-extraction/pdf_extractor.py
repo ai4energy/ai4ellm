@@ -1,20 +1,24 @@
 """
-PDF文本提取模块
+PDF文本提取模块 - 多引擎 + 智能回退
 
-支持多种提取方法：
-1. MinerU - 高质量PDF提取（支持OCR）
-2. OCR API - 调用外部OCR服务（适用于扫描件）
-3. PyMuPDF - 快速文本提取
-4. pdfplumber - 表格提取友好
+引擎优先级:
+1. PyMuPDF - 快速文本提取（首选）
+2. MinerU - 高质量 OCR（扫描件/复杂排版）
+3. pdfplumber - 表格提取友好（备选）
+
+使用方式:
+    from pretrain.text_extraction.pdf_extractor import PDFExtractorPipeline
+    
+    pipeline = PDFExtractorPipeline()
+    pipeline.process_folder("input/pdfs", "output/text")
 """
 
 import os
 import json
-import asyncio
-import argparse
+import tempfile
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -42,19 +46,75 @@ class BasePDFExtractor(ABC):
 
     @abstractmethod
     def extract(self, pdf_path: str) -> ExtractionResult:
-        """提取PDF文本"""
         pass
 
     @abstractmethod
     def is_available(self) -> bool:
-        """检查提取器是否可用"""
         pass
+
+
+class PyMuPDFExtractor(BasePDFExtractor):
+    """PyMuPDF提取器 - 快速文本提取"""
+
+    def __init__(self):
+        self._available = None
+
+    def is_available(self) -> bool:
+        if self._available is None:
+            try:
+                import fitz
+                self._available = True
+            except ImportError:
+                self._available = False
+        return self._available
+
+    def extract(self, pdf_path: str, min_text_length: int = 50) -> ExtractionResult:
+        if not self.is_available():
+            return ExtractionResult(
+                text="", pages=0, method="pymupdf",
+                success=False, error="PyMuPDF未安装"
+            )
+
+        try:
+            import fitz
+            # 抑制 MuPDF 警告
+            fitz.TOOLS.mupdf_warnings(0)
+            
+            doc = fitz.open(pdf_path)
+            text_parts = []
+
+            for page_num in range(doc.page_count):
+                page = doc.load_page(page_num)
+                text_parts.append(page.get_text())
+
+            doc.close()
+
+            full_text = "\n\n".join(text_parts)
+
+            if len(full_text.strip()) < min_text_length:
+                return ExtractionResult(
+                    text="", pages=doc.page_count, method="pymupdf",
+                    success=False, error="文本过少（可能是扫描件）"
+                )
+
+            return ExtractionResult(
+                text=full_text,
+                pages=doc.page_count,
+                method="pymupdf",
+                success=True
+            )
+
+        except Exception as e:
+            return ExtractionResult(
+                text="", pages=0, method="pymupdf",
+                success=False, error=str(e)
+            )
 
 
 class MinerUExtractor(BasePDFExtractor):
     """MinerU提取器 - 高质量PDF提取，支持OCR"""
 
-    def __init__(self, use_gpu: bool = True):
+    def __init__(self, use_gpu: bool = False):
         self.use_gpu = use_gpu
         self._available = None
 
@@ -64,11 +124,10 @@ class MinerUExtractor(BasePDFExtractor):
                 from magic_pdf.data.dataset import PymuDocDataset
                 self._available = True
             except ImportError:
-                logger.warning("MinerU未安装，请运行: pip install magic-pdf[full]")
                 self._available = False
         return self._available
 
-    def extract(self, pdf_path: str) -> ExtractionResult:
+    def extract(self, pdf_path: str, min_text_length: int = 50) -> ExtractionResult:
         if not self.is_available():
             return ExtractionResult(
                 text="", pages=0, method="mineru",
@@ -89,56 +148,53 @@ class MinerUExtractor(BasePDFExtractor):
             # 判断解析方法
             parse_method = ds.classify()
 
-            # 创建输出目录
-            output_dir = Path(pdf_path).parent / "output" / Path(pdf_path).stem
-            output_dir.mkdir(parents=True, exist_ok=True)
+            # 创建临时输出目录
+            with tempfile.TemporaryDirectory() as tmpdir:
+                image_writer = FileBasedDataWriter(tmpdir)
+                md_writer = FileBasedDataWriter(tmpdir)
 
-            image_dir = output_dir / "images"
-            image_dir.mkdir(exist_ok=True)
+                # 执行提取
+                if parse_method == SupportedPdfParseMethod.OCR:
+                    infer_result = ds.apply(doc_analyze, ocr=True)
+                    pipe_result = infer_result.pipe_ocr_mode(image_writer)
+                else:
+                    infer_result = ds.apply(doc_analyze, ocr=False)
+                    pipe_result = infer_result.pipe_txt_mode(image_writer)
 
-            image_writer = FileBasedDataWriter(str(image_dir))
-            md_writer = FileBasedDataWriter(str(output_dir))
+                # 获取Markdown
+                name = Path(pdf_path).stem
+                pipe_result.dump_md(md_writer, f"{name}.md", "images")
 
-            # 执行提取
-            if parse_method == SupportedPdfParseMethod.OCR:
-                logger.info(f"使用OCR模式处理: {pdf_path}")
-                infer_result = ds.apply(doc_analyze, ocr=True)
-                pipe_result = infer_result.pipe_ocr_mode(image_writer)
-            else:
-                logger.info(f"使用文本模式处理: {pdf_path}")
-                infer_result = ds.apply(doc_analyze, ocr=False)
-                pipe_result = infer_result.pipe_txt_mode(image_writer)
+                md_path = os.path.join(tmpdir, f"{name}.md")
+                if os.path.exists(md_path):
+                    with open(md_path, 'r', encoding='utf-8') as f:
+                        text = f.read()
+                else:
+                    text = ""
 
-            # 获取文本
-            name = Path(pdf_path).stem
-            pipe_result.dump_md(md_writer, f"{name}.md", "images")
+                if len(text.strip()) < min_text_length:
+                    return ExtractionResult(
+                        text="", pages=ds.page_count, method="mineru",
+                        success=False, error="OCR提取文本过少"
+                    )
 
-            # 读取生成的Markdown
-            md_path = output_dir / f"{name}.md"
-            if md_path.exists():
-                with open(md_path, 'r', encoding='utf-8') as f:
-                    text = f.read()
-            else:
-                text = ""
-
-            return ExtractionResult(
-                text=text,
-                pages=ds.page_count,
-                method="mineru",
-                success=True,
-                metadata={"output_dir": str(output_dir)}
-            )
+                return ExtractionResult(
+                    text=text,
+                    pages=ds.page_count,
+                    method="mineru",
+                    success=True,
+                    metadata={"parse_method": parse_method.value}
+                )
 
         except Exception as e:
-            logger.error(f"MinerU提取失败: {str(e)}")
             return ExtractionResult(
                 text="", pages=0, method="mineru",
                 success=False, error=str(e)
             )
 
 
-class PyMuPDFExtractor(BasePDFExtractor):
-    """PyMuPDF提取器 - 快速文本提取"""
+class PDFPlumberExtractor(BasePDFExtractor):
+    """pdfplumber提取器 - 表格提取友好"""
 
     def __init__(self):
         self._available = None
@@ -146,195 +202,102 @@ class PyMuPDFExtractor(BasePDFExtractor):
     def is_available(self) -> bool:
         if self._available is None:
             try:
-                import fitz
+                import pdfplumber
                 self._available = True
             except ImportError:
-                logger.warning("PyMuPDF未安装，请运行: pip install PyMuPDF")
                 self._available = False
         return self._available
 
-    def extract(self, pdf_path: str) -> ExtractionResult:
+    def extract(self, pdf_path: str, min_text_length: int = 50) -> ExtractionResult:
         if not self.is_available():
             return ExtractionResult(
-                text="", pages=0, method="pymupdf",
-                success=False, error="PyMuPDF未安装"
+                text="", pages=0, method="pdfplumber",
+                success=False, error="pdfplumber未安装"
             )
 
         try:
-            import fitz
+            import pdfplumber
 
-            doc = fitz.open(pdf_path)
             text_parts = []
+            pages = 0
 
-            for page_num in range(doc.page_count):
-                page = doc.load_page(page_num)
-                text_parts.append(page.get_text())
+            with pdfplumber.open(pdf_path) as pdf:
+                pages = len(pdf.pages)
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        text_parts.append(text)
 
-            doc.close()
+            full_text = "\n\n".join(text_parts)
+
+            if len(full_text.strip()) < min_text_length:
+                return ExtractionResult(
+                    text="", pages=pages, method="pdfplumber",
+                    success=False, error="文本过少"
+                )
 
             return ExtractionResult(
-                text="\n\n".join(text_parts),
-                pages=doc.page_count,
-                method="pymupdf",
+                text=full_text,
+                pages=pages,
+                method="pdfplumber",
                 success=True
             )
 
         except Exception as e:
-            logger.error(f"PyMuPDF提取失败: {str(e)}")
             return ExtractionResult(
-                text="", pages=0, method="pymupdf",
+                text="", pages=0, method="pdfplumber",
                 success=False, error=str(e)
             )
 
 
-class OCRAPIClient:
-    """OCR API客户端基类"""
-
-    @abstractmethod
-    async def recognize(self, image_path: str) -> str:
-        """识别图片中的文字"""
-        pass
-
-
-class DeepSeekOCRClient(OCRAPIClient):
-    """DeepSeek Vision OCR客户端"""
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self._available = None
-
-    def is_available(self) -> bool:
-        if self._available is None:
-            try:
-                from openai import AsyncOpenAI
-                self._available = True
-            except ImportError:
-                self._available = False
-        return self._available
-
-    async def recognize(self, image_path: str) -> str:
-        """使用DeepSeek Vision进行OCR"""
-        try:
-            from openai import AsyncOpenAI
-            import base64
-
-            client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url="https://api.deepseek.com/v1"
-            )
-
-            # 读取图片并编码
-            with open(image_path, 'rb') as f:
-                image_data = base64.b64encode(f.read()).decode()
-
-            response = await client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "请识别图片中的所有文字，保持原有格式输出。"},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
-                        ]
-                    }
-                ],
-                max_tokens=4096
-            )
-
-            return response.choices[0].message.content
-
-        except Exception as e:
-            logger.error(f"DeepSeek OCR失败: {str(e)}")
-            return ""
-
-
-class QwenOCRClient(OCRAPIClient):
-    """通义千问OCR客户端"""
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-
-    async def recognize(self, image_path: str) -> str:
-        """使用通义千问Vision进行OCR"""
-        try:
-            import dashscope
-            from dashscope import MultiModalConversation
-
-            dashscope.api_key = self.api_key
-
-            with open(image_path, 'rb') as f:
-                image_url = f"data:image/jpeg;base64,{f.read().hex()}"
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"image": image_url},
-                        {"text": "请识别图片中的所有文字，保持原有格式输出。"}
-                    ]
-                }
-            ]
-
-            response = MultiModalConversation.call(
-                model='qwen-vl-max',
-                messages=messages
-            )
-
-            return response.output.choices[0].message.content[0]['text']
-
-        except Exception as e:
-            logger.error(f"通义千问OCR失败: {str(e)}")
-            return ""
-
-
 class PDFExtractorPipeline:
-    """PDF提取流水线"""
+    """PDF提取流水线 - 多引擎智能回退"""
 
     def __init__(
         self,
-        use_mineru: bool = True,
         use_pymupdf: bool = True,
-        ocr_api_key: str = None,
-        ocr_api_type: str = None
+        use_mineru: bool = True,
+        use_pdfplumber: bool = False,
+        mineru_use_gpu: bool = False,
     ):
-        """
-        Args:
-            use_mineru: 是否使用MinerU
-            use_pymupdf: 是否使用PyMuPDF作为备选
-            ocr_api_key: OCR API密钥
-            ocr_api_type: OCR API类型 (deepseek, qwen)
-        """
         self.extractors = []
-
-        if use_mineru:
-            self.extractors.append(MinerUExtractor())
+        self.extractor_names = []
 
         if use_pymupdf:
             self.extractors.append(PyMuPDFExtractor())
+            self.extractor_names.append("pymupdf")
 
-        # OCR客户端
-        self.ocr_client = None
-        if ocr_api_key and ocr_api_type:
-            if ocr_api_type == "deepseek":
-                self.ocr_client = DeepSeekOCRClient(ocr_api_key)
-            elif ocr_api_type == "qwen":
-                self.ocr_client = QwenOCRClient(ocr_api_key)
+        if use_mineru:
+            self.extractors.append(MinerUExtractor(use_gpu=mineru_use_gpu))
+            self.extractor_names.append("mineru")
 
-    def extract_with_fallback(self, pdf_path: str, min_text_length: int = 100) -> ExtractionResult:
+        if use_pdfplumber:
+            self.extractors.append(PDFPlumberExtractor())
+            self.extractor_names.append("pdfplumber")
+
+        # 检查可用引擎
+        available = []
+        for name, extractor in zip(self.extractor_names, self.extractors):
+            if extractor.is_available():
+                available.append(name)
+        
+        logger.info(f"可用提取引擎: {available}")
+        if not available:
+            logger.warning("没有可用的提取引擎！")
+
+    def extract_with_fallback(self, pdf_path: str, min_text_length: int = 50) -> ExtractionResult:
         """
-        使用多个提取器尝试提取，直到成功
-
-        Args:
-            pdf_path: PDF文件路径
-            min_text_length: 最小有效文本长度
+        多引擎提取 + 智能回退
+        
+        按优先级尝试每个引擎，直到成功。
         """
         for extractor in self.extractors:
             if not extractor.is_available():
                 continue
 
-            result = extractor.extract(pdf_path)
+            result = extractor.extract(pdf_path, min_text_length)
 
-            if result.success and len(result.text.strip()) >= min_text_length:
+            if result.success:
                 return result
 
         # 所有方法都失败
@@ -350,7 +313,8 @@ class PDFExtractorPipeline:
         self,
         input_folder: str,
         output_folder: str,
-        min_text_length: int = 100
+        min_text_length: int = 50,
+        skip_existing: bool = True,
     ) -> Dict:
         """处理整个文件夹"""
         input_path = Path(input_folder)
@@ -361,24 +325,40 @@ class PDFExtractorPipeline:
             "total": 0,
             "success": 0,
             "failed": 0,
+            "empty": 0,
+            "skipped": 0,
+            "by_method": {},
             "errors": []
         }
 
         pdf_files = list(input_path.rglob("*.pdf"))
+        stats["total"] = len(pdf_files)
 
         from tqdm import tqdm
         for pdf_file in tqdm(pdf_files, desc="处理PDF"):
-            stats["total"] += 1
+            rel_path = pdf_file.relative_to(input_path)
+            cat = rel_path.parts[0] if len(rel_path.parts) > 1 else "unknown"
+            output_file = output_path / cat / f"{pdf_file.stem}.txt"
+
+            # 跳过已存在的文件
+            if skip_existing and output_file.exists() and output_file.stat().st_size > 50:
+                stats["skipped"] += 1
+                stats["success"] += 1
+                continue
 
             result = self.extract_with_fallback(str(pdf_file), min_text_length)
 
             if result.success:
                 # 保存结果
-                output_file = output_path / f"{pdf_file.stem}.txt"
+                os.makedirs(output_file.parent, exist_ok=True)
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(result.text)
 
                 stats["success"] += 1
+                method = result.method
+                stats["by_method"][method] = stats["by_method"].get(method, 0) + 1
+            elif result.error and "文本过少" in result.error:
+                stats["empty"] += 1
             else:
                 stats["failed"] += 1
                 stats["errors"].append({
@@ -390,34 +370,40 @@ class PDFExtractorPipeline:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PDF文本提取")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="PDF文本提取（多引擎）")
     parser.add_argument("--input", "-i", required=True, help="输入PDF文件或文件夹")
     parser.add_argument("--output", "-o", required=True, help="输出路径")
-    parser.add_argument("--method", choices=["mineru", "pymupdf", "auto"], default="auto", help="提取方法")
-    parser.add_argument("--min-length", type=int, default=100, help="最小文本长度")
-    parser.add_argument("--ocr-api-key", help="OCR API密钥")
-    parser.add_argument("--ocr-api-type", choices=["deepseek", "qwen"], help="OCR API类型")
+    parser.add_argument("--method", choices=["pymupdf", "mineru", "pdfplumber", "auto"], 
+                        default="auto", help="提取方法")
+    parser.add_argument("--min-length", type=int, default=50, help="最小文本长度")
+    parser.add_argument("--no-gpu", action="store_true", help="禁用GPU")
 
     args = parser.parse_args()
 
     pipeline = PDFExtractorPipeline(
-        use_mineru=args.method in ["mineru", "auto"],
         use_pymupdf=args.method in ["pymupdf", "auto"],
-        ocr_api_key=args.ocr_api_key,
-        ocr_api_type=args.ocr_api_type
+        use_mineru=args.method in ["mineru", "auto"],
+        use_pdfplumber=args.method in ["pdfplumber", "auto"],
+        mineru_use_gpu=not args.no_gpu,
     )
 
     if os.path.isfile(args.input):
         result = pipeline.extract_with_fallback(args.input, args.min_length)
         if result.success:
+            os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
             with open(args.output, 'w', encoding='utf-8') as f:
                 f.write(result.text)
-            print(f"提取成功，共 {result.pages} 页")
+            print(f"✅ 提取成功 ({result.method}), {result.pages} 页, {len(result.text)} 字符")
         else:
-            print(f"提取失败: {result.error}")
+            print(f"❌ 提取失败: {result.error}")
     else:
         stats = pipeline.process_folder(args.input, args.output, args.min_length)
-        print(f"处理完成: 成功 {stats['success']}/{stats['total']}")
+        print(f"\n✅ 处理完成: 成功 {stats['success']}/{stats['total']}")
+        print(f"  方法分布: {stats['by_method']}")
+        print(f"  空文本: {stats['empty']}")
+        print(f"  失败: {stats['failed']}")
 
 
 if __name__ == "__main__":

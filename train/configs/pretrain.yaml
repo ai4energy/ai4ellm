@@ -1,0 +1,67 @@
+# Qwen3.6-14B LoRA 继续预训练配置
+# 4×RTX 5090 32GB，Blackwell sm_120
+
+# ── 模型 ──
+model:
+  # 本地权重路径（容器内挂载点 /app/models/hf）
+  # 宿主机 /data/robotlele/huggingface/hub/models--Qwen--Qwen3-14B
+  name_or_path: "/app/models/hf/hub/models--Qwen--Qwen3-14B/snapshots"
+  # 真实 snapshot 目录在运行时解析（HF 用 hash 命名），脚本会自动取第一个 snapshot
+  snapshot_dir: null          # null=自动解析；或填绝对路径
+  tokenizer_name_or_path: null   # null=同 model
+  torch_dtype: "bfloat16"     # bf16，Blackwell 原生支持
+  attn_implementation: "flash_attention_2"  # flash-attn；装失败可改 sdpa
+
+# ── 数据 ──
+data:
+  pretrain_file: "/app/data/pretrain.jsonl"   # corpus_pipeline 产出（rich 格式 {"text","meta"}）
+  text_field: "text"
+  max_length: 2048             # 单样本 token 上限（预训练不宜太长，省显存）
+  # 富格式里的 section/category 可拼进 text 作为结构提示（见 data.preprocess）
+  use_section_prefix: true     # meta.section 已在 corpus_pipeline 烤进 text，这里通常 false
+  packing: true                # 打包多 chunk 到 max_length 提高利用率
+
+# ── LoRA ──
+lora:
+  enabled: true                # 预训练继续也可用 LoRA（参数高效）
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+# ── 量化基座（省显存，可选）──
+quantization:
+  enabled: false               # 14B bf16 单卡 32GB 放得下，先不量化
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "bfloat16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+# ── 训练 ──
+training:
+  output_dir: "/app/output/pretrain_qwen3_14b_lora"
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16     # 有效 batch=16
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  logging_steps: 10
+  save_strategy: "steps"
+  save_steps: 500
+  save_total_limit: 3
+  bf16: true
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  report_to: "tensorboard"
+  dataloader_num_workers: 4
+  seed: 42
+
+# ── 断点续训 ──
+resume:
+  resume_from_checkpoint: null   # null=从头；填 output_dir 下的 checkpoint-XXX

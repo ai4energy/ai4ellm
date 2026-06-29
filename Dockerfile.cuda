@@ -1,0 +1,48 @@
+# ============================================================
+# AI4ELLM Dockerfile - CUDA (NVIDIA GPU) version
+# ============================================================
+# Build:
+#   docker build -f Dockerfile.cuda -t ai4ellm:cuda .
+# ============================================================
+
+ARG CUDA_VERSION=12.1
+ARG PYTHON_VERSION=3.12
+
+# ── Base image: NVIDIA CUDA Ubuntu ──
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn8-runtime-ubuntu22.04
+
+ARG PYTHON_VERSION
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ── System deps ──
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev \
+        python3-pip git curl wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Working dir ──
+WORKDIR /app
+
+# ── Copy project ──
+COPY requirements.txt .
+
+# ── Python deps ──
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir \
+         openai \
+         anthropic \
+         dashscope \
+         zhipuai \
+         PyMuPDF \
+         pdfplumber \
+         datasketch \
+         sentence-transformers
+
+# ── Copy source ──
+COPY . .
+
+# ── Data & output volumes ──
+RUN mkdir -p /app/data /app/output
+
+# ── Default ──
+CMD ["python", "scripts/run_sft_pipeline.py", "--config", "configs/sft.yaml"]

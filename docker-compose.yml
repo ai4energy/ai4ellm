@@ -1,0 +1,141 @@
+# ============================================================
+# AI4ELLM — 统一 Docker Compose
+# ============================================================
+# 三容器阵列，基于 aigc-base:torch210
+#
+# GPU 分配（4×RTX 5090）：
+#   GPU0 → train    (LoRA continued pretraining)
+#   GPU1 → eval     (推理 + 评估)
+#   GPU2 → corpus   (MinerU OCR 语料处理)
+#   GPU3 → aigc-voice (已有，不在此管理)
+#
+# 启动:
+#   docker compose up -d                          # 仅 corpus（默认）
+#   docker compose up -d corpus train             # 语料 + 训练
+#   docker compose --profile train run --rm train # 训练
+#   docker compose --profile eval run --rm eval   # 评估
+#   docker compose run --rm corpus cli            # CLI 批处理
+#   docker compose run --rm corpus bash           # 调试
+#
+# 旧命令兼容:
+#   docker compose -f docker-compose.train.yml ... # 仍然可用
+# ============================================================
+
+services:
+
+  # ─────────────────────────────────────────────
+  # 语料处理 + MinerU OCR（GPU2, Streamlit :7860）
+  # ─────────────────────────────────────────────
+  corpus:
+    build:
+      context: .
+      dockerfile: Dockerfile.corpus
+    image: ai4ellm-corpus:torch210
+    container_name: ai4ellm-corpus
+    ports:
+      - "7860:7860"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - APP_MODE=${CORPUS_MODE:-cli}
+      - PIPELINE_CONFIG=/app/config.yaml
+      - HF_HOME=/app/models_cache/huggingface
+      - HF_ENDPOINT=https://hf-mirror.com
+      - TORCH_HOME=/app/models_cache/torch
+      - MODELSCOPE_CACHE=/app/models_cache/modelscope
+      - RUNNING_IN_DOCKER=1
+      - STREAMLIT_SERVER_PORT=7860
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    volumes:
+      # 原始文档（58GB, 1306 PDF, 19 类目）
+      - ./origin-files-organized:/app/input_docs:ro
+      # 语料产出（pretrain.jsonl, 清洗文本, chunks 等）
+      - ./corpus_pipeline/output:/app/output
+      # 模型缓存（PDF-Extract-Kit-1.0 ~3GB, text2vec ~400MB）
+      - ./models_cache:/app/models_cache
+      # 源码热改（开发期覆盖镜像内的 /app/src/）
+      - ./corpus_pipeline:/app/src:ro
+      # 配置文件
+      - ./corpus_pipeline/config.yaml:/app/config.yaml:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: 1
+    shm_size: 16g
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # 训练（GPU0, 无端口暴露）
+  # ─────────────────────────────────────────────
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+    image: ai4ellm-train:torch210
+    container_name: ai4ellm-train
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - HF_HOME=/app/models/hf_cache
+      - HF_HUB_OFFLINE=1
+      - TOKENIZERS_PARALLELISM=false
+    volumes:
+      # 语料（来自 corpus 容器产出）
+      - ./corpus_pipeline/output:/app/data:ro
+      # 训练脚本源（开发期热改）
+      - ./train:/app/train_src
+      # 模型权重（Qwen3-14B 等，宿主机 HF 缓存）
+      - /data/robotlele/huggingface:/app/models/hf:ro
+      # 训练产出（LoRA adapter / checkpoint）
+      - ./train_output:/app/output
+      # 训练配置
+      - ./train/configs:/app/train/configs:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: 1
+    shm_size: 64g
+    # 不自动启动训练（按需手动启动）
+    profiles: ["train"]
+    command: python /app/train_src/run_pretrain.py --config /app/train/configs/pretrain.yaml
+
+  # ─────────────────────────────────────────────
+  # 评估 / 推理（GPU1, OpenAI 兼容 API :8000）
+  # ─────────────────────────────────────────────
+  eval:
+    build:
+      context: .
+      dockerfile: Dockerfile.eval
+    image: ai4ellm-eval:torch210
+    container_name: ai4ellm-eval
+    ports:
+      - "8000:8000"
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - HF_HOME=/app/models/hf/hf_cache
+      - HF_HUB_OFFLINE=1
+      - TOKENIZERS_PARALLELISM=false
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    volumes:
+      # 模型权重（宿主机 HF 缓存）
+      - /data/robotlele/huggingface:/app/models/hf:ro
+      # 评估结果
+      - ./eval_results:/app/output
+      # 训练产出（LoRA adapter，eval 需要合并后加载）
+      - ./train_output:/app/train_output:ro
+      # 语料（评估时需要参考文本）
+      - ./corpus_pipeline/output:/app/data:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: 1
+    shm_size: 32g
+    # 评估容器按需启动，不默认运行
+    profiles: ["eval"]

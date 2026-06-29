@@ -1,0 +1,122 @@
+# ============================================================
+# 语料库构建流水线配置 — 能源领域预训练语料
+# ============================================================
+
+# ---------- 路径配置 ----------
+paths:
+  input_dir: "../origin-files-organized"      # 输入文档根目录（按类目分子文件夹）
+  output_dir: "./output"                      # 输出根目录
+  processed_checkpoint: "processed_files.json"  # 断点续跑记录（相对路径位于 output_dir 下）
+
+# ---------- 文档扫描 ----------
+scan:
+  supported_extensions: [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".txt", ".md"]
+  recursive: true
+
+# ---------- 提取器配置 ----------
+extractors:
+  # Office 文档提取：Linux 走 LibreOffice headless → PDF，失败回退 python-docx/pptx
+  office:
+    use_com: false                             # Linux 无 COM，关闭
+    com_timeout_seconds: 60
+    fallback_to_pure_python: true
+
+  # PDF 提取（多引擎回退：PyMuPDF → MinerU → pdfplumber）
+  pdf:
+    method: "auto"                             # pymupdf | mineru | pdfplumber | auto
+    min_text_length: 50                        # 提取文本少于此长度视为失败/扫描件
+    max_pages: 2000                            # 单 PDF 最大页数（超大文档截断）
+    num_gpus: 0                                # 0=纯CPU；MinerU 需 GPU 时设为可见卡数
+    formula_enable: false                      # MinerU 公式识别（更耗显存）
+    table_enable: false                        # MinerU 表格识别
+
+# ---------- 清洗器配置 ----------
+cleaner:
+  skip_sections:                              # 跳过的章节关键词
+    - "前言"
+    - "目录"
+    - "目 录"
+    - "目 次"
+    - "图书在版编目"
+    - "参考文献"
+    - "acknowledgements"
+    - "table of contents"
+    - "list of figures"
+    - "list of tables"
+  min_body_chars: 50                          # 正文最小词/字符数（中间章节）
+  min_final_body_chars: 150                   # 正文最小词/字符数（末尾章节）
+  remove_garbled: true                        # 去乱码字符
+  clean_refs: true                            # 清理参考文献标记
+  fix_broken_lines: true                      # 修复断行（纯文本清洗用）
+  watermark_keywords:                         # 水印关键词（能源领域 + 通用）
+    - "copyright"
+    - "all rights reserved"
+    - "email"
+    - "www."
+
+# ---------- 文本分割器 ----------
+splitter:
+  max_segment_chars: 500                      # chunk 最大字符数
+  min_segment_chars: 50                       # chunk 最小字符数（低于此值跳过）
+
+# ---------- 语料质量评分 ----------
+quality:
+  enabled: true                               # 启用质量评分
+  filter_enabled: false                       # 默认只打分不删除低质量 chunk
+  min_score: 0.3                             # 最低综合评分阈值（0-1）
+  max_noise_ratio: 0.1                        # 最大可接受噪声比（0-1）
+
+# ---------- 去重配置 ----------
+dedup:
+  rule_dedup:
+    enabled: true                             # chunk 级规则去重（归一化 hash）
+    case_sensitive: false
+
+  semantic_dedup:
+    enabled: false                            # 语义去重（默认关闭，需 numpy + sentence-transformers + GPU）
+    model_name: "shibing624/text2vec-base-chinese"
+    similarity_threshold: 0.92
+    batch_size: 128
+    device: "auto"                            # auto | cuda | cpu
+
+# ---------- 导出器配置 ----------
+exporter:
+  formats: ["jsonl", "json"]                  # 富格式语料输出
+  jsonl:
+    ensure_ascii: false
+  json:
+    ensure_ascii: false
+    indent: 2
+
+# ---------- 预训练格式化（新增）----------
+pretrain:
+  enabled: true                               # 生成预训练 JSONL
+  output_file: "pretrain.jsonl"               # 位于 output_dir 下
+  format: "rich"                              # standard | rich（standard={"text":...}，rich 带 meta 溯源）
+  min_length: 100                            # content 最小长度过滤
+  max_length: 1000000                         # content 最大长度过滤
+  include_section_prefix: true                # text 前加 "# {section}\n\n" 结构提示
+
+# ---------- 日志配置 ----------
+logging:
+  level: "INFO"
+  log_dir: "./output/logs"
+  use_loguru: true
+  log_to_file: true
+  log_to_console: true
+  rotation: "10 MB"
+  retention: "30 days"
+
+# ---------- 流水线开关 ----------
+pipeline:
+  steps:
+    convert_office: true                      # Office → 文本
+    extract_pdf: true                         # PDF 文本提取
+    extract_text: true                        # TXT/MD 直接提取
+    clean_markdown: true                      # Markdown/文本清洗（章节感知）
+    rule_dedup: true                          # chunk 级规则去重
+    semantic_dedup: false                     # 语义去重（默认关闭）
+    quality_filter: true                      # 质量评分过滤
+    export: true                              # 导出富 JSONL/JSON
+    pretrain: true                            # 预训练格式化
+  failure_strategy: "continue"                # continue | abort

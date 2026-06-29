@@ -1,0 +1,51 @@
+# ============================================================
+# AI4ELLM Dockerfile - Energy Domain LLM Corpus & SFT Pipeline
+# ============================================================
+# Build for Hygon DCU (ROCm):
+#   docker build -f Dockerfile.rocm -t ai4ellm:rocm .
+#
+# Build for NVIDIA GPU (CUDA):
+#   docker build -f Dockerfile.cuda  -t ai4ellm:cuda .
+# ============================================================
+
+ARG ROCM_VERSION=6.0
+ARG PYTHON_VERSION=3.12
+
+# ── Base image: ROCm Ubuntu ──
+FROM rocm/dev-ubuntu-22.04:${ROCM_VERSION}
+
+ARG PYTHON_VERSION
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ── System deps ──
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev \
+        python3-pip git curl wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Working dir ──
+WORKDIR /app
+
+# ── Copy project ──
+COPY requirements.txt .
+
+# ── Python deps ──
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir \
+         openai \
+         anthropic \
+         dashscope \
+         zhipuai \
+         PyMuPDF \
+         pdfplumber \
+         datasketch \
+         sentence-transformers
+
+# ── Copy source ──
+COPY . .
+
+# ── Data & output volumes (mount at runtime) ──
+RUN mkdir -p /app/data /app/output
+
+# ── Default: run SFT pipeline ──
+CMD ["python", "scripts/run_sft_pipeline.py", "--config", "configs/sft.yaml"]

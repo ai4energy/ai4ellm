@@ -1,0 +1,46 @@
+# ============================================================
+# AI4ELLM Training Dockerfile - Qwen3.6 LoRA 训练
+# ============================================================
+# 基于 aigc-base:torch210（torch 2.10.0+cu128, transformers 5.8.1, accelerate 1.13.0）
+# 补装训练栈：trl / peft / datasets / bitsandbytes / flash-attn
+# 适配 4×RTX 5090（Blackwell sm_120，需 CUDA 12.8+）
+#
+# Build:
+#   docker build -f Dockerfile.train -t ai4ellm-train:torch210 .
+# ============================================================
+
+FROM aigc-base:torch210
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# ── 训练栈依赖（在 torch/transformers/accelerate 之上补）──
+# bitsandbytes: 4/8bit 量化基座（显存友好）
+# peft: LoRA adapter
+# datasets: 数据加载
+# trl: SFTTrainer（预训练 + SFT 通用，1.x API）
+# flash-attn: Blackwell 兼容需 >=2.7（sm_120），可选加速
+RUN pip install --no-cache-dir \
+        bitsandbytes==0.48.0 \
+        peft==0.17.0 \
+        datasets==4.7.0 \
+        trl==1.7.0 \
+        tensorboard \
+        einops \
+        sentencepiece \
+        protobuf
+
+# flash-attn 单独装（编译慢，可选；sm_120 支持需较新版）
+# 若编译失败可注释掉，训练回退到 sdpa attention
+RUN pip install --no-cache-dir flash-attn --no-build-isolation || \
+    echo "[WARN] flash-attn 安装失败，将使用 sdpa attention（不影响正确性，仅略慢）"
+
+# ── 训练脚本 & 语料 ──
+COPY train/ /app/train/
+
+# 模型与语料通过 volume 挂载（见 docker-compose.train.yml）
+RUN mkdir -p /app/data /app/output /app/models
+
+# 默认：打印帮助
+CMD ["python", "/app/train/run_pretrain.py", "--help"]

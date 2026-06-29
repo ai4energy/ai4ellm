@@ -1,0 +1,67 @@
+# ============================================================
+# AI4ELLM Eval Dockerfile — 评估 / 推理服务
+# ============================================================
+# 基于 aigc-base:torch210（torch 2.10.0+cu128, transformers 5.8.1, accelerate 1.13.0）
+# 补装推理 + 评估栈：vllm / lm-eval / evaluate / 指标库
+# 适配 4×RTX 5090（Blackwell sm_120，需 CUDA 12.8+）
+#
+# Build:
+#   docker build -f Dockerfile.eval -t ai4ellm-eval:torch210 .
+#
+# Run:
+#   docker compose --profile eval up -d eval
+#   docker compose --profile eval run --rm eval python /app/eval/run_eval.py --config ...
+#   docker compose --profile eval run --rm eval bash
+# ============================================================
+
+FROM aigc-base:torch210
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ── 系统依赖 ──
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── 推理 + 评估依赖 ──
+# vllm: 高性能推理引擎（OpenAI 兼容 API + batch inference）
+# lm-eval: EleutherAI 评估框架（perplexity, HellaSwag, MMLU 等）
+# evaluate: HF 评估库（BLEU, ROUGE, BERTScore）
+# rouge-score: ROUGE 指标实现
+# jieba: 中文分词（用于中文 BLEU/ROUGE）
+# sacrebleu: BLEU 指标（多语言支持）
+RUN pip install --no-cache-dir \
+        vllm \
+        lm-eval \
+        evaluate \
+        rouge-score \
+        sacrebleu \
+        jieba \
+        bert-score \
+        openai \
+        httpx \
+        aiohttp \
+        PyYAML \
+        loguru \
+        tqdm \
+        pandas \
+        matplotlib \
+        seaborn
+
+# ── 工作目录 ──
+WORKDIR /app
+
+# ── 创建目录 ──
+RUN mkdir -p /app/models/hf /app/output /app/eval/configs
+
+# ── 环境变量 ──
+ENV PYTHONUNBUFFERED=1 \
+    HF_HOME=/app/models/hf/hf_cache \
+    HF_HUB_OFFLINE=1 \
+    TOKENIZERS_PARALLELISM=false \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+EXPOSE 8000
+
+# 默认：打印帮助
+CMD ["python", "-c", "print('ai4ellm-eval ready. Use: python /app/eval/run_eval.py --config ...')"]

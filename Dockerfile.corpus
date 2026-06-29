@@ -1,0 +1,115 @@
+# ============================================================
+# AI4ELLM Corpus Pipeline Dockerfile — 语料处理
+# ============================================================
+# 基于 aigc-base:torch210（torch 2.10.0+cu128, transformers 5.8.1）
+# MinerU 装在独立 venv（/venv-mineru），使用锁定版本：
+#   - transformers==4.49.0
+#   - magic-pdf[full]==1.3.12
+#   - CUDA 11.8 PyTorch wheels
+# 系统依赖（LibreOffice、字体等）继承自 aigc-base 或补装。
+#
+# Build:
+#   docker build -f Dockerfile.corpus -t ai4ellm-corpus:torch210 .
+#
+# Run:
+#   docker compose up -d corpus         # Streamlit Web UI
+#   docker compose run --rm corpus cli  # CLI 批处理
+#   docker compose run --rm corpus bash # 进入容器调试
+# ============================================================
+
+FROM aigc-base:torch210
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ── 补装系统依赖（aigc-base 可能已有部分）──
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        # OpenCV / OCR / MinerU 运行时
+        libgl1 \
+        libglib2.0-0 \
+        libsm6 \
+        libxrender1 \
+        libxext6 \
+        libgomp1 \
+        # PDF 工具
+        poppler-utils \
+        # LibreOffice: Office 文档 → PDF 转换
+        libreoffice \
+        libreoffice-writer \
+        libreoffice-impress \
+        # 中文字体
+        fonts-noto-cjk \
+        fonts-wqy-zenhei \
+        # 工具
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── 创建 MinerU 独立 venv ──
+# MinerU 需要 transformers==4.49.0，与基础镜像的 transformers 5.8.1 冲突
+# 使用 CUDA 12.8 PyTorch（基础镜像已有 cu128，但 venv 需要独立安装以匹配 RTX 5090 sm_120）
+RUN python3 -m venv /venv-mineru && \
+    /venv-mineru/bin/pip install --no-cache-dir --upgrade pip && \
+    /venv-mineru/bin/pip install --no-cache-dir \
+        torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/cu128
+
+# ── MinerU 依赖（隔离在 /venv-mineru）──
+RUN /venv-mineru/bin/pip install --no-cache-dir \
+        "magic-pdf[full]==1.3.12" \
+        "transformers==4.49.0" \
+        PyMuPDF \
+        PyPDF2 \
+        python-docx \
+        python-pptx \
+        sentence-transformers \
+        numpy \
+        loguru \
+        tqdm \
+        chardet \
+        PyYAML
+
+# ── 主 venv 依赖（继承自 aigc-base:torch210，补装语料处理所需）──
+RUN pip install --no-cache-dir \
+        streamlit \
+        pandas \
+        PyMuPDF \
+        PyPDF2 \
+        python-docx \
+        python-pptx \
+        sentence-transformers \
+        loguru \
+        tqdm \
+        chardet
+
+# ── 工作目录 ──
+WORKDIR /app
+
+# ── 复制入口脚本和配置 ──
+COPY docker/magic-pdf.json /app/magic-pdf.json
+COPY docker-entrypoint-corpus.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+# ── 复制源码（会被 volume 覆盖为热改版本）──
+COPY corpus_pipeline/ /app/src/
+COPY corpus_pipeline/config.yaml /app/config.yaml
+
+# ── 创建必要目录 ──
+RUN mkdir -p /app/input_docs /app/output/logs /app/output/reports /app/models_cache
+
+# ── 环境变量 ──
+ENV PYTHONUNBUFFERED=1 \
+    HF_HOME=/app/models_cache/huggingface \
+    TORCH_HOME=/app/models_cache/torch \
+    MODELSCOPE_CACHE=/app/models_cache/modelscope \
+    RUNNING_IN_DOCKER=1 \
+    STREAMLIT_SERVER_PORT=7860 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    # MinerU venv 路径（entrypoint 中调用）
+    MINERU_VENV=/venv-mineru
+
+EXPOSE 7860
+
+HEALTHCHECK --interval=60s --timeout=15s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:7860/_stcore/health || exit 1
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["web"]

@@ -1,0 +1,38 @@
+# AI4ELLM Training - Qwen3.6 LoRA 训练
+#
+# 用法:
+#   docker compose -f docker-compose.train.yml build
+#   docker compose -f docker-compose.train.yml run --rm train bash
+#   docker compose -f docker-compose.train.yml run --rm train python /app/train/run_pretrain.py --config /app/train/configs/pretrain.yaml
+#
+# 模型权重 & 语料通过 volume 挂载，不入镜像。
+
+services:
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+    image: ai4ellm-train:torch210
+    container_name: ai4ellm-train
+    # 单卡训练（vllm-qwen 已停，语料 OCR 占 GPU2，训练用 GPU0）
+    # 多卡改 deploy.resources.reservations.devices 或用 --gpus
+    environment:
+      - HF_HOME=/app/models/hf_cache
+      - HF_HUB_OFFLINE=1
+      - TOKENIZERS_PARALLELISM=false
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./corpus_pipeline/output:/app/data:ro        # 语料（pretrain.jsonl）
+      - ./train:/app/train_src                        # 训练脚本源（开发期热改）
+      - /data/robotlele/huggingface:/app/models/hf:ro  # 模型权重（Qwen3-14B 等）
+      - ./train_output:/app/output                     # 训练产出（adapter/checkpoint）
+      - ./train/configs:/app/train/configs:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: 1
+    shm_size: 64g
+    command: python /app/train/run_pretrain.py --config /app/train/configs/pretrain.yaml
