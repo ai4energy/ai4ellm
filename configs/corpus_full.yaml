@@ -1,0 +1,105 @@
+# 全量 PDF 语料配置（~/books, 4,877 PDF）
+# 用法:
+#   cd ~/ai4ellm-remote/corpus_pipeline
+#   ~/ai4ellm/.venv/bin/python main.py --config ~/ai4ellm/configs/corpus_full.yaml
+paths:
+  input_dir: "/home/ai4e-hermes/books-processed"
+  output_dir: "/home/ai4e-hermes/corpus/full-20261102-renamed"
+  processed_checkpoint: "processed_files.json"
+
+scan:
+  supported_extensions: [".pdf"]
+  recursive: true
+
+extractors:
+  office:
+    use_com: false
+    com_timeout_seconds: 60
+    fallback_to_pure_python: true
+  pdf:
+    method: "auto"            # PyMuPDF → MinerU(未装) → pdfplumber
+    min_text_length: 50
+    max_pages: 2000
+    num_gpus: 0
+    formula_enable: false
+    table_enable: false
+
+cleaner:
+  skip_sections:
+    - "前言"
+    - "目录"
+    - "目 录"
+    - "目 次"
+    - "图书在版编目"
+    - "参考文献"
+    - "acknowledgements"
+    - "table of contents"
+    - "list of figures"
+    - "list of tables"
+  min_body_chars: 50
+  min_final_body_chars: 150
+  remove_garbled: true
+  clean_refs: true
+  fix_broken_lines: true
+  watermark_keywords:
+    - "copyright"
+    - "all rights reserved"
+    - "email"
+    - "www."
+
+splitter:
+  max_segment_chars: 800      # 硬上限（补丁后生效）
+  min_segment_chars: 100
+  write_chunk_files: false    # 全量不生成百万级 chunk_s*.txt
+
+quality:
+  enabled: true
+  filter_enabled: true        # 全量开启质量过滤
+  min_score: 0.4
+  max_noise_ratio: 0.1
+
+dedup:
+  rule_dedup:
+    enabled: true
+    case_sensitive: false
+  semantic_dedup:
+    enabled: false
+    model_name: "shibing624/text2vec-base-chinese"
+    similarity_threshold: 0.92
+    batch_size: 128
+    device: "auto"
+
+exporter:
+  formats: ["jsonl"]          # 不重复写 json/corpus.json
+  jsonl:
+    ensure_ascii: false
+
+pretrain:
+  enabled: true
+  output_file: "pretrain.jsonl"
+  format: "rich"
+  min_length: 100
+  max_length: 1000000
+  include_section_prefix: true
+
+logging:
+  level: "INFO"
+  log_dir: "/home/ai4e-hermes/corpus/full-20261102-renamed/logs"
+  use_loguru: true
+  log_to_file: true
+  log_to_console: true
+  rotation: "10 MB"
+  retention: "30 days"
+
+pipeline:
+  steps:
+    convert_office: false
+    extract_pdf: true
+    extract_text: false
+    clean_markdown: true
+    rule_dedup: true
+    semantic_dedup: false
+    quality_filter: true
+    export: true
+    pretrain: true
+  failure_strategy: "continue"

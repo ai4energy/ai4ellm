@@ -1,0 +1,45 @@
+# P0 QLoRA 100 步冒烟配置（单卡 GPU2）
+# 容器内路径: /models 挂载自 /data/models, /work 挂载自 ~/ai4ellm
+run_name: qlora-smoke
+model_path: /models/llm/Qwen3.8-27B-bf16
+data_path: /work/data/synthetic-50.jsonl
+output_dir: /work/runs/2026-11-02-qlora-smoke
+seed: 42
+
+quant:
+  load_in_4bit: true
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+
+lora:
+  r: 32
+  alpha: 32
+  dropout: 0.05
+  # Qwen3.5: full-attention q/k/v/o + MLP + linear-attention in_proj_*/out_proj
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+    - in_proj_qkv
+    - in_proj_z
+    - in_proj_b
+    - in_proj_a
+    - out_proj
+
+train:
+  max_length: 2048
+  batch_size: 1
+  grad_accum: 4
+  max_steps: 100
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5
+  scheduler: cosine
+  gradient_checkpointing: true
+  max_grad_norm: 1.0
+  logging_steps: 1

@@ -1,0 +1,6 @@
+# ai4ellm-ocr:paddleocr3.7 镜像实测版本（2026-11-02，RTX 5090 sm_120）
+paddlepaddle-gpu==3.4.0        # CUDA 13.0 wheel（官方 cu130 index）
+paddleocr==3.7.0
+paddlex[ocr]==3.7.2
+pymupdf==1.28.2
+numpy==2.3.5

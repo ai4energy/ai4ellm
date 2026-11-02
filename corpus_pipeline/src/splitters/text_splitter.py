@@ -87,20 +87,24 @@ def _split_long_sentence(sentence: str, max_chars: int = 500) -> list[str]:
     parts = [p.strip() for p in parts if p.strip()]
 
     if not parts:
-        return [sentence[:max_chars]]
+        # 无标点可拆（索引/表格行）：硬切，避免产生超长 chunk
+        return [sentence[i:i + max_chars] for i in range(0, len(sentence), max_chars)]
 
-    # 贪心拼接
+    # 贪心拼接；单个 part 仍超长时先硬切
     result = []
     current = ""
     for p in parts:
+        while len(p) > max_chars:
+            if current.strip():
+                result.append(current.strip())
+                current = ""
+            result.append(p[:max_chars])
+            p = p[max_chars:]
         if current and len(current) + len(p) + 1 > max_chars:
             result.append(current.strip())
             current = p
         else:
-            if current:
-                current += "，" + p
-            else:
-                current = p
+            current = current + "，" + p if current else p
     if current.strip():
         result.append(current.strip())
 
@@ -112,6 +116,7 @@ def split_sections(
     output_dir: str,
     max_segment_chars: int = 500,
     min_segment_chars: int = 50,
+    write_txt_files: bool = True,
 ) -> list[dict]:
     """
     从 cleaned_text/ 目录中的 _sections.json 文件智能切分文本块。
@@ -156,8 +161,13 @@ def split_sections(
             full_path = section.get("full_path", title)
             level = section.get("level", 1)
 
-            # 句子级切分
-            sentences = _split_by_sentences(body)
+            # 句子级切分；单句超长时先按逗号/分号/硬切拆分，保证 chunk 封顶
+            sentences = []
+            for sent in _split_by_sentences(body):
+                if len(sent) > max_segment_chars:
+                    sentences.extend(_split_long_sentence(sent, max_segment_chars))
+                else:
+                    sentences.append(sent)
 
             # 贪心拼接
             current = ""
@@ -198,13 +208,14 @@ def split_sections(
     # 输出 _chunks.json（结构化数据）
     chunks_json_path = os.path.join(output_dir, "_chunks.json")
     with open(chunks_json_path, "w", encoding="utf-8") as f:
-        json.dump(all_chunks, f, ensure_ascii=False, indent=2)
+        json.dump(all_chunks, f, ensure_ascii=False, separators=(",", ":"))
 
-    # 输出 .txt 文件（向后兼容）
-    for chunk in all_chunks:
-        txt_path = os.path.join(output_dir, f"chunk_s{chunk['chunk_index']}.txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(f"# {chunk['section_title']}\n{chunk['content']}\n")
+    # 输出 .txt 文件（向后兼容；全量语料可关闭，避免百万级小文件）
+    if write_txt_files:
+        for chunk in all_chunks:
+            txt_path = os.path.join(output_dir, f"chunk_s{chunk['chunk_index']}.txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(f"# {chunk['section_title']}\n{chunk['content']}\n")
 
     logger.info(f"文本分割完成: {len(sections_files)} 个 sections 文件 → {len(all_chunks)} 个 chunk")
     return all_chunks
