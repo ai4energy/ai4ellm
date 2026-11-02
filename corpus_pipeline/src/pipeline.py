@@ -223,8 +223,20 @@ class CorpusPipeline:
         from src.extractors.pdf_extractor import process_folder_parallel
         pdf_config = self.config.get_extractor_config().get("pdf", {})
 
-        pending = [f for f in pdf_files if not self.tracker.is_stage_completed(f, "extract_pdf")]
-        already_done = [f for f in pdf_files if self.tracker.is_stage_completed(f, "extract_pdf")]
+        def has_existing_output(f: str) -> bool:
+            stem = os.path.splitext(os.path.basename(f))[0]
+            for ext in (".txt", ".md"):
+                p = os.path.join(extracted_dir, f"{stem}{ext}")
+                if os.path.exists(p) and os.path.getsize(p) > 0:
+                    return True
+            return False
+
+        pending = [f for f in pdf_files
+                   if not self.tracker.is_stage_completed(f, "extract_pdf")
+                   and not has_existing_output(f)]
+        already_done = [f for f in pdf_files
+                        if self.tracker.is_stage_completed(f, "extract_pdf")
+                        or has_existing_output(f)]
         self.stats.files_extracted = len(already_done)
         for f in already_done:
             self.logger.info(f"跳过已提取 PDF: {f}")

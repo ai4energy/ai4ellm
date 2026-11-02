@@ -134,15 +134,21 @@ class _PDFPlumberExtractor:
                 self._available = False
         return self._available
 
-    def extract(self, pdf_path: str, min_text_length: int = 50):
+    def extract(self, pdf_path: str, min_text_length: int = 50,
+                max_pages: int = 300, max_mb: int = 80):
         if not self.is_available():
             return "", 0, False, "pdfplumber未安装"
         try:
+            size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
+            if size_mb > max_mb:
+                return "", 0, False, f"文件过大({size_mb:.0f}MB)，跳过pdfplumber，建议OCR"
             import pdfplumber
             text_parts = []
             pages = 0
             with pdfplumber.open(pdf_path) as pdf:
                 pages = len(pdf.pages)
+                if pages > max_pages:
+                    return "", pages, False, f"页数过多({pages})，跳过pdfplumber，建议OCR"
                 for page in pdf.pages:
                     text = page.extract_text()
                     if text:
