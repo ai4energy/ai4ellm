@@ -323,6 +323,7 @@ class CorpusPipeline:
             output_dir=chunks_dir,
             max_segment_chars=splitter_config.get("max_segment_chars", 500),
             min_segment_chars=splitter_config.get("min_segment_chars", 50),
+            write_txt_files=splitter_config.get("write_chunk_files", True),
         )
         self.stats.chunks_generated = len(chunks)
         self.logger.info(f"结构化切分完成: {len(chunks)} 个 chunk")
@@ -412,7 +413,7 @@ class CorpusPipeline:
         chunks_json_path = os.path.join(chunks_dir, "_chunks.json")
         if chunks:
             with open(chunks_json_path, "w", encoding="utf-8") as f:
-                json.dump(chunks, f, ensure_ascii=False, indent=2)
+                json.dump(chunks, f, ensure_ascii=False, separators=(",", ":"))
 
         if "jsonl" in formats:
             jsonl_dir = os.path.join(output_dir, "jsonl")
